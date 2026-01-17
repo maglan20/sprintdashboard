@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sprint Burndown Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+        
+        .header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 20px 30px; border-bottom: 1px solid #334155; }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header .subtitle { color: #94a3b8; font-size: 14px; margin-top: 4px; }
+        
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        
+        .config-bar { background: #1e293b; padding: 15px 20px; border-radius: 12px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
+        .config-bar input { flex: 1; min-width: 300px; padding: 10px 15px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 14px; }
+        .config-bar input:focus { outline: none; border-color: #3b82f6; }
+        .config-bar button { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-secondary { background: #334155; color: #e2e8f0; }
+        .btn-secondary:hover { background: #475569; }
+        
+        .status-bar { display: flex; gap: 15px; align-items: center; margin-bottom: 20px; }
+        .status-indicator { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94a3b8; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.connected { background: #22c55e; }
+        .status-dot.disconnected { background: #ef4444; }
+        .status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .stat-card { background: linear-gradient(135deg, #1e293b 0%, #1e3a5f 100%); padding: 20px; border-radius: 12px; border: 1px solid #334155; }
+        .stat-value { font-size: 32px; font-weight: 700; color: #3b82f6; }
+        .stat-label { font-size: 12px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        .charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px; }
+        @media (max-width: 1200px) { .charts-row { grid-template-columns: 1fr; } }
+        
+        .chart-card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+        .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .chart-container { height: 400px; position: relative; }
+        
+        .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 15px; }
+        .control-group { display: flex; flex-direction: column; gap: 4px; }
+        .control-group label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+        .control-group select { padding: 8px 12px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #e2e8f0; font-size: 13px; }
+        
+        .legend-card { background: #1e293b; border-radius: 12px; padding: 15px; border: 1px solid #334155; margin-top: 20px; }
+        .legend-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; max-height: 250px; overflow-y: auto; }
+        .legend-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: background 0.2s; }
+        .legend-item:hover { background: rgba(255,255,255,0.05); }
+        .legend-item.hidden { opacity: 0.3; }
+        .legend-color { width: 16px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+        
+        .side-charts { display: flex; flex-direction: column; gap: 20px; }
+        .mini-chart { height: 200px; }
+        
+        .empty-state { text-align: center; padding: 60px 20px; color: #64748b; }
+        .empty-state h3 { margin-bottom: 10px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Sprint Burndown Dashboard</h1>
+        <p class="subtitle">Issue progress visualization</p>
+    </div>
+    
+    <div class="container">
+        <div class="config-bar">
+            <input type="text" id="sheetUrl" placeholder="Paste your Google Sheet published CSV URL here...">
+            <button class="btn-primary" onclick="loadData()">Load Data</button>
+            <button class="btn-secondary" onclick="refreshData()">🔄 Refresh</button>
+            <input type="file" id="fileInput" accept=".csv" onchange="loadFile(event)" style="display:none">
+            <button class="btn-secondary" onclick="document.getElementById('fileInput').click()">📁 Load File</button>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Not connected</span>
+            </div>
+            <span style="color:#64748b;font-size:12px;" id="lastUpdate"></span>
+        </div>
+        
+        <div id="emptyState" class="empty-state">
+            <h3>No data loaded</h3>
+            <p>Paste your Google Sheet CSV URL above, or load a local CSV file</p>
+            <p style="margin-top:15px;font-size:12px;">To get the URL: Google Sheet → File → Share → Publish to web → Select "Changelog Data" → CSV</p>
+        </div>
+        
+        <div id="dashboard" style="display:none;">
+            <div class="stats-grid" id="statsGrid"></div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label>Issue Type</label>
+                    <select id="typeFilter" onchange="applyFilters()"><option value="all">All Types</option></select>
+                </div>
+                <div class="control-group">
+                    <label>Final Status</label>
+                    <select id="statusFilter" onchange="applyFilters()"><option value="all">All Statuses</option></select>
+                </div>
+                <div class="control-group">
+                    <label>Actions</label>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn-secondary" onclick="toggleAll(true)">Show All</button>
+                        <button class="btn-secondary" onclick="toggleAll(false)">Hide All</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="charts-row">
+                <div class="chart-card">
+                    <div class="chart-title">Issue Progress Burndown</div>
+                    <div class="chart-container"><canvas id="burndownChart"></canvas></div>
+                </div>
+                <div class="side-charts">
+                    <div class="chart-card">
+                        <div class="chart-title">Current Status Distribution</div>
+                        <div class="mini-chart"><canvas id="statusPie"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Issues by Type</div>
+                        <div class="mini-chart"><canvas id="typePie"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="legend-card">
+                <div class="legend-title">Issues (click to toggle visibility)</div>
+                <div class="legend-grid" id="legend"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STATUS_ORDER = {
+            '(Created)': 0, 'ToDo': 1, 'To Do': 1, 'In Peer Review': 2, 'Ready': 3,
+            'In Progress': 4, 'In Progress (Currenct Release)': 4, 'On Hold': 4,
+            'In Code Review': 5, 'In QA': 6, 'Waiting for Bugs fix': 6,
+            'Resolved': 7, 'Done': 8, 'Closed': 8, 'Deferred': 8
+        };
+        
+        const COLORS = [
+            '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#10b981', '#14b8a6',
+            '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899',
+            '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#a3e635', '#4ade80', '#34d399', '#2dd4bf',
+            '#22d3ee', '#38bdf8', '#60a5fa', '#818cf8', '#a78bfa', '#c084fc', '#e879f9', '#f472b6'
+        ];
+        
+        let datasets = [];
+        let charts = { burndown: null, status: null, type: null };
+        let sheetUrl = localStorage.getItem('sheetUrl') || '';
+        
+        // Initialize
+        document.getElementById('sheetUrl').value = sheetUrl;
+        if (sheetUrl) loadData();
+        
+        function setStatus(status, text) {
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            dot.className = 'status-dot ' + status;
+            txt.textContent = text;
+        }
+        
+        function loadData() {
+            const url = document.getElementById('sheetUrl').value.trim();
+            if (!url) return alert('Please enter a Google Sheet CSV URL');
+            
+            localStorage.setItem('sheetUrl', url);
+            sheetUrl = url;
+            setStatus('loading', 'Loading...');
+            
+            fetch(url)
+                .then(r => r.text())
+                .then(csv => {
+                    processCSV(csv);
+                    setStatus('connected', 'Connected');
+                    document.getElementById('lastUpdate').textContent = 'Last updated: ' + new Date().toLocaleString();
+                })
+                .catch(err => {
+                    setStatus('disconnected', 'Error: ' + err.message);
+                    alert('Failed to load data: ' + err.message);
+                });
+        }
+        
+        function refreshData() {
+            if (sheetUrl) loadData();
+        }
+        
+        function loadFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                processCSV(e.target.result);
+                setStatus('connected', 'Loaded from file');
+                document.getElementById('lastUpdate').textContent = 'Loaded: ' + file.name;
+            };
+            reader.readAsText(file);
+        }
+        
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (const char of line) {
+                if (char === '"') inQuotes = !inQuotes;
+                else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+                else current += char;
+            }
+            result.push(current.trim());
+            return result;
+        }
+        
+        function processCSV(csv) {
+            const lines = csv.trim().split(/\r?\n/);
+            const issues = {};
+            
+            for (let i = 1; i < lines.length; i++) {
+                const cols = parseCSVLine(lines[i]);
+                if (cols.length < 6) continue;
+                
+                const [key, summary, type, from, to, changedAt] = cols;
+                if (!key?.trim()) continue;
+                
+                if (!issues[key]) issues[key] = { summary, type, points: [] };
+                
+                if (to && changedAt) {
+                    const ts = new Date(changedAt);
+                    if (!isNaN(ts)) {
+                        issues[key].points.push({
+                            x: ts,
+                            y: STATUS_ORDER[to] ?? 4,
+                            status: to
+                        });
+                    }
+                }
+            }
+            
+            // Build datasets
+            datasets = [];
+            let colorIdx = 0;
+            
+            for (const [key, issue] of Object.entries(issues)) {
+                if (!issue.points.length) continue;
+                
+                const points = issue.points.sort((a, b) => a.x - b.x);
+                datasets.push({
+                    label: key,
+                    data: points,
+                    borderColor: COLORS[colorIdx % COLORS.length],
+                    backgroundColor: COLORS[colorIdx % COLORS.length],
+                    fill: false,
+                    stepped: 'before',
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    borderWidth: 2,
+                    issueType: issue.type || 'Unknown',
+                    summary: issue.summary || '',
+                    hidden: false
+                });
+                colorIdx++;
+            }
+            
+            if (datasets.length === 0) {
+                alert('No valid data found in CSV');
+                return;
+            }
+            
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            
+            renderDashboard();
+        }
+        
+        function renderDashboard() {
+            // Stats
+            const total = datasets.length;
+            const completed = datasets.filter(d => (d.data.at(-1)?.y ?? 0) >= 8).length;
+            const inProgress = datasets.filter(d => { const y = d.data.at(-1)?.y ?? 0; return y > 1 && y < 8; }).length;
+            const pct = total ? Math.round(completed / total * 100) : 0;
+            
+            document.getElementById('statsGrid').innerHTML = `
+                <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">Total Issues</div></div>
+                <div class="stat-card"><div class="stat-value">${completed}</div><div class="stat-label">Completed</div></div>
+                <div class="stat-card"><div class="stat-value">${inProgress}</div><div class="stat-label">In Progress</div></div>
+                <div class="stat-card"><div class="stat-value">${total - completed - inProgress}</div><div class="stat-label">Blocked/Waiting</div></div>
+                <div class="stat-card"><div class="stat-value">${pct}%</div><div class="stat-label">Completion</div></div>
+            `;
+            
+            // Filters
+            const types = [...new Set(datasets.map(d => d.issueType))].sort();
+            const typeSelect = document.getElementById('typeFilter');
+            typeSelect.innerHTML = '<option value="all">All Types</option>' + types.map(t => `<option value="${t}">${t}</option>`).join('');
+            
+            const statuses = [...new Set(datasets.map(d => d.data.at(-1)?.status))].filter(Boolean).sort();
+            const statusSelect = document.getElementById('statusFilter');
+            statusSelect.innerHTML = '<option value="all">All Statuses</option>' + statuses.map(s => `<option value="${s}">${s}</option>`).join('');
+            
+            renderCharts();
+            renderLegend();
+        }
+        
+        function renderCharts() {
+            // Burndown
+            if (charts.burndown) charts.burndown.destroy();
+            charts.burndown = new Chart(document.getElementById('burndownChart'), {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'nearest', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15,23,42,0.9)',
+                            titleColor: '#e2e8f0',
+                            bodyColor: '#94a3b8',
+                            borderColor: '#334155',
+                            borderWidth: 1,
+                            callbacks: {
+                                title: items => `${items[0]?.dataset?.label} (${items[0]?.dataset?.issueType})`,
+                                afterTitle: items => items[0]?.dataset?.summary?.slice(0, 60) + '...',
+                                label: item => item.raw.status
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'day', displayFormats: { day: 'MMM d' } },
+                            grid: { color: 'rgba(148,163,184,0.1)' },
+                            ticks: { color: '#64748b' }
+                        },
+                        y: {
+                            min: 0, max: 9, reverse: true,
+                            ticks: {
+                                stepSize: 1,
+                                color: '#64748b',
+                                callback: v => ['', 'ToDo', 'Peer Rev', 'Ready', 'Progress', 'Code Rev', 'In QA', 'Resolved', 'Done'][v] || ''
+                            },
+                            grid: { color: 'rgba(148,163,184,0.1)' }
+                        }
+                    }
+                }
+            });
+            
+            // Status pie
+            const statusCounts = {};
+            datasets.forEach(d => {
+                const s = d.data.at(-1)?.status || 'Unknown';
+                statusCounts[s] = (statusCounts[s] || 0) + 1;
+            });
+            
+            if (charts.status) charts.status.destroy();
+            charts.status = new Chart(document.getElementById('statusPie'), {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(statusCounts),
+                    datasets: [{ data: Object.values(statusCounts), backgroundColor: COLORS }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 } } } }
+                }
+            });
+            
+            // Type pie
+            const typeCounts = {};
+            datasets.forEach(d => { typeCounts[d.issueType] = (typeCounts[d.issueType] || 0) + 1; });
+            
+            if (charts.type) charts.type.destroy();
+            charts.type = new Chart(document.getElementById('typePie'), {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(typeCounts),
+                    datasets: [{ data: Object.values(typeCounts), backgroundColor: COLORS.slice(8) }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 } } } }
+                }
+            });
+        }
+        
+        function renderLegend() {
+            const container = document.getElementById('legend');
+            container.innerHTML = datasets.map((ds, i) => `
+                <div class="legend-item ${ds.hidden ? 'hidden' : ''}" onclick="toggleIssue(${i})">
+                    <div class="legend-color" style="background:${ds.borderColor}"></div>
+                    <span>${ds.label} (${ds.issueType}) → ${ds.data.at(-1)?.status || 'N/A'}</span>
+                </div>
+            `).join('');
+        }
+        
+        function toggleIssue(idx) {
+            datasets[idx].hidden = !datasets[idx].hidden;
+            charts.burndown.update();
+            renderLegend();
+        }
+        
+        function applyFilters() {
+            const type = document.getElementById('typeFilter').value;
+            const status = document.getElementById('statusFilter').value;
+            
+            datasets.forEach(ds => {
+                const typeOk = type === 'all' || ds.issueType === type;
+                const statusOk = status === 'all' || ds.data.at(-1)?.status === status;
+                ds.hidden = !(typeOk && statusOk);
+            });
+            
+            charts.burndown.update();
+            renderLegend();
+        }
+        
+        function toggleAll(show) {
+            datasets.forEach(ds => ds.hidden = !show);
+            charts.burndown.update();
+            renderLegend();
+        }
+        
+        // Auto-refresh every 5 minutes if connected
+        setInterval(() => { if (sheetUrl) refreshData(); }, 5 * 60 * 1000);
+    </script>
+</body>
+</html>
